@@ -2,6 +2,8 @@ import numpy as np
 from terminaltables import AsciiTable
 import itertools
 from dataclasses import dataclass
+import sys
+import csv
 
 import tensorflow.keras.layers as keras_layers
 import larq.layers as lq_layers
@@ -327,7 +329,7 @@ class ModelProfile(LayerProfile):
                 "Non-trainable params",
                 _number_as_readable_str(self.weight_count(trainable=False)),
             ],
-            ["Model size:", f"{self.memory / (8*1024*1024):.2f} MB"],
+            ["Model size", f"{self.memory / (8*1024*1024):.2f} MB"],
             [
                 "Float-32 Equivalent",
                 f"{self.fp_equivalent_memory / (8*1024*1024):.2f} MB",
@@ -432,3 +434,51 @@ def summary(model, print_fn=None, include_macs=True):
             model_profile.generate_summary(include_macs), title=f"{model.name} summary"
         ).table
     )
+
+
+def save_summary(model, filename):
+    """Writes a summary of the network to a CSV file.
+
+    See `summary` for details on the information that is being written.
+
+    # Arguments
+    model: `tf.keras` model instance.
+    filename: Name of a (CSV) file to save the summary to, or None or "-" to write to standard output.
+
+    # Raises
+    ValueError: if called before the model is built.
+    TypeError: when filename is not a valid type.
+    OSError: when file can not be opened for writing.
+    """
+
+    if not model.built:
+        raise ValueError(
+            "This model has not yet been built. Build the model first by calling "
+            "`model.build()` or calling `model.fit()` with some data, or specify an "
+            "`input_shape` argument in the first layer(s) for automatic build."
+        )
+
+    def filteroutput(x):
+        # Strip newlines in table header
+        if isinstance(x, str):
+            return x.replace("\n", " ")
+        else:
+            return x
+
+    if filename is None or filename == "-":
+        csvfile = sys.stdout
+    else:
+        csvfile = open(filename, "w", newline="")
+
+    csvwriter = csv.writer(csvfile)
+    model_profile = ModelProfile(model)
+    table = model_profile.generate_table()
+    table[:] = [[filteroutput(x) for x in row] for row in table]
+    csvwriter.writerows(table)
+    csvwriter.writerow([])
+    table = model_profile.generate_summary(True)
+    table = zip(*table)
+    csvwriter.writerows(table)
+
+    if csvfile is not sys.stdout:
+        csvfile.close()

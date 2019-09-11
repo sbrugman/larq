@@ -110,6 +110,27 @@ def test_summary_invalid_model():
         lq.models.summary(tf.keras.Model())
 
 
+def test_save_summary(snapshot, capsys):
+    model = get_profile_model()
+    lq.models.save_summary(model, "-")
+    captured = capsys.readouterr()
+    snapshot.assert_match(captured.out)
+
+
+def test_save_summary_invalid_model():
+    with pytest.raises(ValueError):
+        lq.models.save_summary(tf.keras.Model(), "-")
+
+
+def test_save_summary_invalid_filename():
+    with pytest.raises(TypeError):
+        lq.models.save_summary(get_profile_model(), [1, 2, 3])
+    with pytest.raises(OSError):
+        lq.models.save_summary(get_profile_model(), 18)
+    with pytest.raises(OSError):
+        lq.models.save_summary(get_profile_model(), "///")
+
+
 @pytest.fixture(autouse=True)
 def run_around_tests():
     tf.keras.backend.clear_session()
