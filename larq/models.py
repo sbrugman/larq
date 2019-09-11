@@ -447,6 +447,7 @@ def save_summary(model, filename):
 
     # Raises
     ValueError: if called before the model is built.
+    ValueError: if the model contains a layer with more than 4 dimensions (including batch size).
     TypeError: when filename is not a valid type.
     OSError: when file can not be opened for writing.
     """
@@ -458,23 +459,61 @@ def save_summary(model, filename):
             "`input_shape` argument in the first layer(s) for automatic build."
         )
 
-    def filteroutput(x):
-        # Strip newlines in table header
-        if isinstance(x, str):
-            return x.replace("\n", " ")
-        else:
-            return x
-
     if filename is None or filename == "-":
         csvfile = sys.stdout
     else:
         csvfile = open(filename, "w", newline="")
 
-    csvwriter = csv.writer(csvfile)
+    def fixDimensions(tablerow):
+        newrow = []
+        for x in tablerow:
+            if isinstance(x, tuple):
+                if len(x) > 4:
+                    raise ValueError(
+                        "Model contains a layer with more than 4 dimensions"
+                    )
+                # Remove the batch size dimension
+                x = x[1:]
+                # Pad to exactly three entries
+                y = [None] * (3 - len(x)) + [str(a) for a in x]
+                newrow += y
+            else:
+                newrow.append(x)
+        return newrow
+
     model_profile = ModelProfile(model)
-    table = model_profile.generate_table()
-    table[:] = [[filteroutput(x) for x in row] for row in table]
-    csvwriter.writerows(table)
+
+    table_config = {
+        "param_bidtwidths": model_profile.unique_param_bidtwidths,
+        "mac_precisions": model_profile.unique_op_precisions,
+        "param_units": 1,
+        "memory_units": 8 * 1024,
+        "mac_units": 1,
+    }
+
+    csv_header = [
+        "Layer",
+        "Input precision (bits)",
+        "Output dimension 1",
+        "Output dimension 2",
+        "Output dimension 3",
+        *(
+            f"# {i}-bit x {table_config['param_units']}"
+            for i in table_config["param_bidtwidths"]
+        ),
+        f"Memory ({_bitsize_as_str(table_config['memory_units'])})",
+        *(f"{i}-bit MACs" for i in table_config["mac_precisions"]),
+    ]
+
+    csv_layers = []
+    for lp in model_profile.layer_profiles:
+        csv_layers.append(fixDimensions(lp.generate_table_row(table_config)))
+
+    csv_layers.append(fixDimensions(model_profile._generate_table_total(table_config)))
+
+    csvwriter = csv.writer(csvfile)
+    csvwriter.writerow(csv_header)
+    csvwriter.writerows(csv_layers)
     csvwriter.writerow([])
     table = model_profile.generate_summary(True)
     table = zip(*table)
